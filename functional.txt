@@ -1,0 +1,131 @@
+“Two-thirds of the way to Lisp”
+- or -
+Functional-ish programming techniques in Javascript
+
+A refresher or primer for some programming techniques that will be unfamiliar to C++ programmers.
+
+~ with examples from the Sync codebase! ~
+
+-----------------
+= Key concepts
+* Functions are first-class citizens, not offsets in executable code address space.
+* Programming is algorithms • data structures.
+
+-----------------
+= Higher-order and anonymous functions
+- As arguments
+- As return values
+
+Functions and methods can take other functions as arguments:
+
+  channel.visitResponseHeaders(function (header, value) {
+    headers[header.toLowerCase()] = value;
+  });
+
+They can return them as values, store them, and so on:
+
+  let requestBody;
+  function send(statusCode, status, body) {
+    return function(request, response) {
+      requestBody = readBytesFromInputStream(request.bodyInputStream);
+      response.setStatusLine(request.httpVersion, statusCode, status);
+      response.bodyOutputStream.write(body, body.length);
+    };
+  }
+
+  ...
+ 
+  _("Let's fire up the server and actually change the password.");
+  server = httpd_setup({
+    "/user/1.0/johndoe/password": send(200, "OK", ""),
+    "/user/1.0/janedoe/password": send(401, "Unauthorized", "Forbidden!")
+  });
+
+This is all fairly straightforward. The trick is when you get to closures.
+
+= Closures
+
+Perhaps the most common (inadvertently or not) technique. Functions can *close over* values in their environment; wherever the function goes, its *closure* goes with it. It's not really a function per se: it's a closure.
+
+  let hmacErrorCount = 0;
+  function counting(f) {
+    return function() {
+      hmacErrorCount++;
+      return f.call(this);
+    };
+  }
+
+When you start looking for it, you see this *everywhere*. You even see closures over other functions.
+
+The important thing here is that the 'thing' being carried is not a name; the function returned by counting() does not modify an arbitrary hmacErrorCount in its execution environment. It modifies the lexical variable you see. Furthermore, as written that function will *share* hmacErrorCount between its returned closures! We could rewrite counting() to not do that, but then we'd need to find a different way to examine hmacErrorCount…
+
+= Currying
+- And 'this' in bind
+
+Currying is a functional programming technique in which a new function is created with a pre-bound set of argument to call another function. In Javascript we use `bind`, which is aware of the JavaScript `this` concept. For example:
+
+  function plus(x, y) {
+    return x + y;
+  }
+
+  let increment = plus.bind(this, 1);
+
+  increment(5);    // => 6
+    
+(Sorry, no simple example for this in Sync!)
+
+= Array comprehensions (only in JS 1.7+)
+
+Old way of doing things:
+
+  let out = [];
+  for (let name in Engines._engines) {
+    out.push(Engines._engines[name]);
+  }
+  return out;
+
+New:
+
+  return [engine for ([name, engine] in Iterator(Engines._engines))];
+  
+= Generator expressions (only in JS 1.8+)
+
+If you want to be lazy about it:
+
+  (i * i for (i in [1, 2, 3, 4, 5]) if (i > 2)).slice(1)
+
+returns a generator:
+
+  for (let x in (i * i for (i in [1, 2, 3, 4, 5]) if (i > 2))) {
+    print(x);
+  };
+  // Prints 9, 16, never materializing an array.
+
+
+
+= Proper scoping with `let` (Only in JS 1.7+)
+
+In general, always use `let` over `var`.
+
+Can be used to generate truly closure-private variables:
+
+  handler: function handler() {
+    let self = this;
+    return function(request, response) {
+      check_headers(request);
+      let method = self[request.method];
+      return method.apply(self, arguments);
+    };
+  }
+
+Calling handler() will return a function that knows about a variable, `self`, that isn't accessible to anything outside the closure.
+
+`let` scopes a variable to a block, lexically. Indeed, `let` admits a block:
+
+  let (x = x + 10, y = 12) {    // "x + 10" refers to enclosing x!
+    print(x + y + "\n");  
+  }  
+
+By contrast, `var` declarations are scoped to the entire enclosing function, or create attributes on the global object.
+
+https://developer.mozilla.org/en/new_in_javascript_1.7#let_statement
